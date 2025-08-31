@@ -1,6 +1,6 @@
 
 //====== SYS  ====== 
-IO_LOC  "sys_clk"   V22;
+IO_LOC  "sys_clk"   V22; // 50MHz
 IO_PORT "sys_clk"   IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3 DRIVE=OFF;
 
 //====== SWITCH  ====== 
