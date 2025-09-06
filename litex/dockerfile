@@ -1,0 +1,12 @@
+FROM python:3.9
+
+RUN apt update && apt install -y \
+    ninja-build libgl1 libnss3 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
+    libxcb-shape0 libdbus-1-3 libxcb-util1 libasound2t64 \
+    libqt5core5t64 libqt5dbus5t64 libqt5gui5t64 x11-xserver-utils \
+    gcc-riscv64-unknown-elf \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# export PATH=$PATH:/opt/Gowin/IDE/bin
