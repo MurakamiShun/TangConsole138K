@@ -10,7 +10,7 @@ interface ddr3_phys_if#(
     var rst_n : logic;
     var clk_p : logic;
     var clk_n : logic;
-    var a     : logic<16>;
+    var a     : logic<14>;
     var ba    : logic<3>;
     var dm    : logic<DATA_WIDTH/8>;
     var dq    : logic<DATA_WIDTH>;
@@ -98,8 +98,10 @@ module ddr3_dq_dqs(
     rst      : input reset,
     ddr3_clk : input clock,
 
-    dqs : inout logic,
-    dm  : inout logic<8>,
+    dq   : inout logic<8>,
+    dm    : inout logic,
+    dqs_p : inout logic,
+    dqs_n : inout logic,
 ){
     var dll_stop : logic;
     var dll_lock : logic;
@@ -125,6 +127,8 @@ module ddr3_dq_dqs(
     var dqs_rvalid : logic;
     var dqs_rburst : logic;
 
+    inst 
+
     inst ddr_dll : DDRDLL#(
         DLL_FORCE : 1'b0, // forced delay step or lock control (0 to normal mode)
         CODESCAL : 3'b000, // phase shift config for DDRLL (000 to 101 degree)
@@ -146,8 +150,8 @@ module ddr3_dq_dqs(
         .OEN : DQS_out_en,
         .O   : DQS_out,
 
-        .IO  : dqs_p[i],
-        .IOB : dqs_n[i],
+        .IO  : dqs_p,
+        .IOB : dqs_n,
     );
 
     inst dqs : DQS#(
@@ -275,7 +279,7 @@ module ddr3_dq_dqs(
             OEN : IOBUF_out_enable,
             O   : IODELAY_out,
 
-            IO  : phys_if.dq[i],
+            IO  : dq[i],
         );
     }
 }
