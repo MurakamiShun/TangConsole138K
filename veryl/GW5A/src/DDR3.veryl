@@ -1,0 +1,477 @@
+interface ddr3_phys_if#(
+    param DATA_WIDTH : u32 = 32,
+){
+    var odt   : logic;
+    var cke   : logic;
+    var we_n  : logic;
+    var cas_n : logic;
+    var ras_n : logic;
+    var cs_n  : logic;
+    var rst_n : logic;
+    var clk_p : logic; // differential
+    var clk_n : logic; // differential
+    var a     : logic<13>;
+    var ba    : logic<3>;
+    var dm    : logic<DATA_WIDTH/8>;
+    var dq    : logic<DATA_WIDTH>;
+    var dqs_p : logic<DATA_WIDTH/8>; // differential
+    var dqs_n : logic<DATA_WIDTH/8>; // differential
+
+    modport Phys {
+        odt   : output,
+        cke   : output,
+        we_n  : output,
+        cas_n : output,
+        ras_n : output,
+        cs_n  : output,
+        rst_n : output,
+        clk_p : output,
+        clk_n : output,
+        a     : output,
+        ba    : output,
+        dm    : output,
+        dq    : inout,
+        dqs_p : inout,
+        dqs_n : inout,
+    }
+}
+
+
+proto package proto_ddr3_cfg{
+    const tCK   : u32;
+    const tCKE  : u32;
+    const tFAW  : u32;
+    const tRAS  : u32;
+    const tRCD  : u32;
+    const tREFI : u32;
+    const tRFC  : u32;
+    const tRP   : u32;
+    const tPRD  : u32;
+    const tWTR  : u32;
+
+    const AL  : u32;
+    const CL  : u32;
+    const CAS : u32;
+}
+
+
+package ddr3_pkg{
+    struct CMD{
+        CKE  : logic,
+        nWE  : logic,
+        nCAS : logic,
+        nRAS : logic,
+        nCS  : logic,
+        A    : logic<13>,
+        BA   : logic<3>,
+    }
+}
+
+
+
+module ddr3_phys_burst8::<cfg : proto_ddr3_cfg>#(
+    param DATA_WIDTH : u32 = 32,
+)(
+    sys_clk : input clock,
+    sys_rst : input reset,
+    ddr3_clk : input clock,
+    phys_if : modport ddr3_phys_if::Phys,
+){
+    var cmd_buf : CMD[4];
+
+    inst clock_output : ddr3_clk_phys(
+        ddr3_clk,
+        sys_rst,
+
+        clk : phys_if.clk,
+    );
+
+    // command and address outputs
+    inst clock_enable_ser8 : ddr3_oser8(
+        sys_clk,
+        sys_rst,
+        ddr3_clk_n : ~ddr3_clk,
+        data : {
+            cmd_buf[3].CKE[i], cmd_buf[2].CKE[i],
+            cmd_buf[1].CKE[i], cmd_buf[0].CKE[i]
+        },
+        phys_pin : phys_if.cke[i],
+    );
+    inst write_enable_ser8 : ddr3_oser8(
+        sys_clk,
+        sys_rst,
+        ddr3_clk_n : ~ddr3_clk,
+        data : {
+            cmd_buf[3].nWE[i], cmd_buf[2].nWE[i],
+            cmd_buf[1].nWE[i], cmd_buf[0].nWE[i]
+        },
+        phys_pin : phys_if.we_n[i],
+    );
+    inst col_addr_strb_ser8 : ddr3_oser8(
+        sys_clk,
+        sys_rst,
+        ddr3_clk_n : ~ddr3_clk,
+        data : {
+            cmd_buf[3].nCAS[i], cmd_buf[2].nCAS[i],
+            cmd_buf[1].nCAS[i], cmd_buf[0].nCAS[i]
+        },
+        phys_pin : phys_if.cas_n[i],
+    );
+    inst row_addr_strb_ser8 : ddr3_oser8(
+        sys_clk,
+        sys_rst,
+        ddr3_clk_n : ~ddr3_clk,
+        data : {
+            cmd_buf[3].nRAS[i], cmd_buf[2].nRAS[i],
+            cmd_buf[1].nRAS[i], cmd_buf[0].nRAS[i]
+        },
+        phys_pin : phys_if.ras_n[i],
+    );
+    inst chip_select_ser8 : ddr3_oser8(
+        sys_clk,
+        sys_rst,
+        ddr3_clk_n : ~ddr3_clk,
+        data : {
+            cmd_buf[3].nCS[i], cmd_buf[2].nCS[i],
+            cmd_buf[1].nCS[i], cmd_buf[0].nCS[i]
+        },
+        phys_pin : phys_if.cs_n[i],
+    );
+
+    // bank address outputs
+    for i in 0..3 : DDR3_BANK_ADDR_PIN_OUT {
+        inst bank_addr_ser8 : ddr3_oser8(
+            sys_clk,
+            sys_rst,
+            ddr3_clk_n : ~ddr3_clk,
+            data : {
+                cmd_buf[3].BA[i], cmd_buf[2].BA[i],
+                cmd_buf[1].BA[i], cmd_buf[0].BA[i]
+            },
+            phys_pin : phys_if.ba[i],
+        );
+    }
+    // address outputs
+    for i in 0..13 : DDR3_ADDR_PIN_OUT {
+        inst addr_ser8 : ddr3_oser8(
+            sys_clk,
+            sys_rst,
+            ddr3_clk_n : ~ddr3_clk,
+            data : {
+                cmd_buf[3].A[i], cmd_buf[2].A[i],
+                cmd_buf[1].A[i], cmd_buf[0].A[i]
+            },
+            phys_pin : phys_if.a[i],
+        );
+    }
+
+    // data and datamask inputs and outputs
+    for i in 0..DQS_BITS : DQS{
+        inst dq_dm_dqs_out_phys : ddr3_dq_dm_dqs(
+            sys_clk,
+            rst,
+            ddr3_clk,
+
+            dqs : phys_if.dqs[i],
+            dm  : phys_if.dm[i*8+7 : i*8],
+        );
+    }
+}
+
+module ddr3_clk_phys(
+    sys_clk  : input clock,
+    sys_rst  : input reset,
+    ddr3_clk : input clock,
+
+    inc_delay : input logic,
+
+    clk_p : output logic,
+    clk_n : output logic,
+){
+    // Addr/CMD Leveling
+
+    inst ddr_dll : DDRDLL#(
+        DLL_FORCE : 1'b0, // forced delay step or lock control (0 to normal mode)
+        CODESCAL : 3'b000, // phase shift config for DDRLL (000 to 101 degree)
+        SCAL_EN : "false", // phase shift control (false to 90 degree, true to use CODESCAL)
+        DIV_SEL : 1'b0, // lock mode (0 to nomal, 1 to fast-lock-mode)
+    )(
+        // inputs
+        CLKIN : ddr3_clk,
+        RESET    : rst, // 1 to reset
+        STOP     : dll_stop, // clock control (0 to enable)
+        UPDNCNTL : dll_update_ctnl, // update control (0 to update, 1 to keep)
+        // outputs
+        LOCK     : dll_lock, // 1 to lock
+        STEP     : dll_step, // delay step
+    );
+
+    // Physical Pin delay
+    var ddr3_clk_delayed : logic;
+    var of_uf : logic;
+    inst clk_delay : $sv::DLLDLY#(
+        DLY_SIGN   : 0, // delay direction (0 to '+', 1step=12.5s)
+        DLY_ADJ    : 0,
+        STEP_SEL   : 1'b0, // use DLLSTEP
+        ADAPT_EN   : "TRUE", // adaptive mode enable
+    )(
+        // inputs
+        DLLSTEP  : dll_step,
+        CLKIN : ddr3_clk,
+        LOADN : rst_n,
+        MOVE : , // move delay step with posedge
+        // outputs
+        CLKOUT : ddr3_clk_delayed,
+        FLAG : of_uf,
+    );
+    inst clk_emu_lvds_obuf : $sv::ELVDS_OBUF(
+        I  : ddr3_clk_delayed,
+        O  : clk_p,
+        OB : clk_n,
+    );
+}
+
+// Programmable IO documentation https://cdn.gowinsemi.com.cn/UG289E.pdf
+
+module ddr3_oser8(
+    sys_clk  : input clock,
+    sys_rst  : input reset,
+    ddr3_clk : input clock,
+
+    data     : input logic<4>,
+    phys_pin : output logic,
+){
+    var rst : logic;
+    always_comb {
+        if_reset{
+            rst = 1;
+        }
+        else{
+            rst = 0;
+        }  
+
+    }
+    // change data when ddr3_clk is negedge
+    inst output_seriallizer : $sv::OSER8#(
+        GSREN : "false", // global reset GSR
+        LSREN : "true", // local reset GSR
+        TXCLK_POL : 1'b0, // clock polarity of IOBUF_out_en (posedge)
+        HWL : "false", // d_up1 is one cycle ahead of d_up0
+    )(
+        Q0 : phys_pin,
+        // Q1, (floating)
+        D0 : data[0], D1 : data[0], D2 : data[1], D3 : data[1],
+        D4 : data[2], D5 : data[2], D6 : data[3], D7 : data[3],
+        TX0 : 1'b0, TX1 : 1'b0, TX2 : 1'b0, TX3 : 1'b0, 
+        FCLK : ~ddr3_clk, // fast clock
+        PCLK : sys_clk, // primary clock
+        RESET : rst, // active high
+    );
+}
+// https://www.gowinsemi.com/upload/database_doc/2465/document_ja/65c1e6a70eb0d.pdf
+module ddr3_dq_dm_dqs(
+    sys_clk  : input clock,
+    sys_rst  : input reset,
+    ddr3_clk : input clock,
+
+    rdata : output logic<8,8>,
+    wdata : input  logic<8,8>,
+    dmask : input  logic<8>,
+    
+    dll_stop : input logic,
+    dll_update_ctnl : input logic,
+    dll_lock : output logic,
+
+    dq    : inout logic<8>,
+    dm    : output logic,
+    dqs_p : inout logic,
+    dqs_n : inout logic,
+){
+    var rst_n : logic;
+    var rst   : logic;
+    always_comb{
+        if_reset{
+            rst_n = 0;
+            rst   = 1;
+        }
+        else{
+            rst_n = 1;
+            rst   = 0;
+        }
+    }
+    var dll_step : logic<8>;
+    
+    var DQS_in  : logic;
+    var DQS_o   : logic;
+    var DQS_oen : logic;
+    
+    var dqsr90_clk  : clock; // read clock(DRAM to FPGA)
+    var dqsw270_clk : clock; 
+    var dqsw0_clk   : clock; // write clock(FPGA to DRAM)
+
+    var dqs_hold : logic;
+    var dqs_read_en : logic<4>;
+    var dqs_read_clk_sel : logic<3>;
+    var dqs_reset : logic;
+    var dqs_rpoint : logic<3>;
+    var dqs_wpoint : logic<3>;
+    var dqs_rflag : logic;
+    var dqs_wflag : logic;
+    var dqs_rvalid : logic;
+    var dqs_rburst : logic;
+
+    inst dqs_emu_lvds_iobuf : $sv::ELVDS_IOBUF(
+        I   : DQS_o,
+        OEN : DQS_oen,
+        O   : DQS_i,
+
+        IO  : dqs_p,
+        IOB : dqs_n,
+    );
+
+    inst dqs : DQS#(
+        FIFO_MODE_SEL : 1'b0, // FIFO-mode (0 to DDR 1 to GDDR)
+        RD_PNTR : 3'b000, // FIFO read pointer setting
+        DQS_MODE : "X4", // MDDR select (DQS mode)
+        HWL : "false", // Updata0/1 time relation control
+    )(
+        // inputs
+        DLLSTEP : dll_step, // DQS delay control
+        DQSIN   : DQS_i,
+        FCLK    : ddr3_clk, // fast clock
+        HOLD    : dqs_hold,
+        PCLK    : sys_clk, // primary clock
+        RDIR    : 1'd1, // Adjusts the delay direction of read (1 to decrease delay)
+        RLOADN  : rst_n, // asynchronous reset the final delay (active low)
+        RMOVE   : 1'd0, // Changes the delay step of DDR read on falling edge, once per pulse.
+        WDIR    : 1'd1, // Adjusts the delay direction of write (1 to decrease)
+        WLOADN  : rst_n, // Resets the final delay step of DDR write (active low)
+        WMOVE   : 1'd0, // Changes the delay step of DDR write on falling edge, once per pulse.
+        WSTEP   : 8'd0, // DDR write equalization delay control.
+        READ    : dqs_read_en, // Read signal for DDR read mode
+        RCLKSEL : dqs_read_clk_sel, // Select read clock source and polarity control 
+        RESET   : rst, // DQS reset control (active high)
+
+        // outputs
+        RPOINT  : dqs_rpoint, // FIFO read pointer for RADDR in IDES8_MEM
+        WPOINT  : dqs_wpoint, // FIFO write pointer for WADDR in IDES8_MEM
+        DQSW0   : dqsw0_clk, // SCLK/ECLK phase shifted or delayed by 0 degree for TCLK in OSER8_MEM
+        DQSW270 : dqsw270_clk, // SCLK/ECLK phase shifted or delayed by 0 degree for TCLK in OSER8_MEM
+        DQSR90  : dqsr90_clk, // DQSI phase shifted or delayed by 90 degree for ICLK in IDES8_MEM
+        RFLAG   : dqs_rflag, // indicate the under-flow or over-flow of read
+        WFLAG   : dqs_wflag, // indicate the under-flow or over-flow of write
+        RVALID  : dqs_rvalid, // Data Valid Flag in READ mode
+        RBURST  : dqs_rburst, // READ burst detect
+    );
+
+    inst dqs_oser : $sv::OSER8_MEM#(
+        GSREN : "false", // global reset GSR
+        LSREN : "false", // local reset GSR
+        TXCLK_POL : 1'b0, // clock polarity of IOBUF_out_en (posedge)
+        TCLK_SOURCE : "DQSW", // from dqsw0
+        HWL : "false", // d_up1 is one cycle ahead of d_up0 
+    )(
+        Q0 : DQS_o,
+        Q1 : DQS_oen,
+        D0 : dqs_obuf[0], D1 : dqs_obuf[1],
+        D2 : dqs_obuf[2], D3 : dqs_obuf[3],
+        D4 : dqs_obuf[4], D5 : dqs_obuf[5],
+        D6 : dqs_obuf[6], D7 : dqs_obuf[7],
+        TX0 : dqs_oenbuf[0],
+        TX1 : dqs_oenbuf[1],
+        TX2 : dqs_oenbuf[2],
+        TX3 : dqs_oenbuf[3],
+        TCLK : dqsw0_clk, // DQS clock
+        FCLK : ddr3_clk, // fast clock
+        PCLK : sys_clk, // primary clock
+        RESET : rst, // active high
+    );
+
+    // datamask outputs (sync to data)
+
+    // data inputs and outputs
+    for i in 0..8 : DDR_SERDES {
+        var IOBUF_in  : logic;
+        var IOBUF_out : logic;
+        var IOBUF_out_en : logic;
+        var out_delay_df : logic;
+        var IODELAY_out : logic;
+        var in_delay_df : logic;
+        var IODELAY_in : logic;
+
+        
+        inst dq_deserial : $sv::IDES8_MEM#(
+            GSREN : "false", // global reset GSR
+            LSREN : "false", // local reset GSR
+        )(
+            D : IOBUF_in,
+            ICLK : dqsr90_clk,
+            FCLK : ddr3_clk,
+            PCLK : sys_clk, // 1/4 FCLK = 1/4 ICLK
+            WADDR : dqs_wpoint,
+            RADDR : dqs_rpoint,
+            CALIB, // shifted one per pulse (usually sync to PCLK)
+            RESET : rst,
+            Q0 : dout[0][i], Q1 : dout[1][i],
+            Q2 : dout[2][i], Q3 : dout[3][i],
+            Q4 : dout[4][i], Q5 : dout[5][i],
+            Q6 : dout[6][i], Q7 : dout[7][i],
+        );
+        inst dq_serial : $sv::OSER8_MEM#(
+            GSREN : "false", // global reset GSR
+            LSREN : "false", // local reset GSR
+            TXCLK_POL : 1'b0, // clock polarity of IOBUF_out_en (posedge)
+            TCLK_SOURCE : "DQSW", // from dqsw0
+            HWL : "false", // d_up1 is one cycle ahead of d_up0 
+        )(
+            Q0 : IOBUF_out,
+            Q1 : IOBUF_out_en,
+            D0 : din[0][i], D1 : din[1][i],
+            D2 : din[2][i], D3 : din[3][i],
+            D4 : din[4][i], D5 : din[5][i],
+            D6 : din[6][i], D7 : din[7][i],
+            TX0 : 1'b0,
+            TX1 : 1'b0,
+            TX2 : 1'b0,
+            TX3 : 1'b0,
+            TCLK : dqsw0_clk, // DQS clock
+            FCLK : ddr3_clk, // fast clock
+            PCLK : sys_clk, // primary clock
+            RESET : rst, // active high
+        );
+
+        inst out_delay : $sv::IODELAY#(
+            C_STATIC_DLY : 0, // static delay (0~127, 1step=22ps)
+        )(
+            // inputs
+            DI : IOBUF_out,
+            SDTAP : 0, // 0 to static delay
+            SETN  : 0, // delay (0 to increase, 1 to decrease)
+            VALUE : 0, // change delay when posedge 
+            // outputs
+            DF : out_delay_df,// data over-flow or under-flow
+            DO : IODELAY_out,
+        );
+
+        inst in_delay : $sv::IODELAY#(
+            C_STATIC_DLY : 0, // static delay (0~127, 1step=22ps)
+        )(
+            // inputs
+            DI : IODELAY_in,
+            SDTAP : 0, // 0 to static delay
+            SETN  : 0, // delay (0 to increase, 1 to decrease)
+            VALUE : 0, // change delay when posedge 
+            // outputs
+            DF : out_delay_df,// data over-flow or under-flow
+            DO : IOBUF_out,
+        );
+
+        inst ddr_data_iobuf : $sv::IOBUF(
+            I   : IODELAY_in,
+            OEN : IOBUF_out_enable,
+            O   : IODELAY_out,
+
+            IO  : dq[i],
+        );
+    }
+}
